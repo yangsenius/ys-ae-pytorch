@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from models.layers import Conv, Hourglass, Pool
-
+from extensions.AE.AE_loss import AEloss
 from models.loss import HeatmapLoss
 
 class Merge(nn.Module):
@@ -34,7 +34,7 @@ class PoseNet(nn.Module):
         self.merge_preds = nn.ModuleList( [Merge(oup_dim, inp_dim) for i in range(nstack-1)] )
 
         self.nstack = nstack
-        self.myAEloss = 0
+        self.myAEloss = AEloss()
         self.heatmapLoss = HeatmapLoss()
 
     def forward(self, imgs):
@@ -58,7 +58,7 @@ class PoseNet(nn.Module):
         tag_loss = []
         for i in range(self.nstack):
             tag = tags[:,i].contiguous().view(batchsize, -1, 1)
-            tag_loss.append(0)   ############################################# tag_loss.append( self.myAEloss(tag, keypoints) ) 
+            tag_loss.append( self.myAEloss(tag, keypoints) )  # tag_loss.append(0.0)
         tag_loss = torch.stack(tag_loss, dim = 1).cuda(tags.get_device())
 
         detection_loss = []
