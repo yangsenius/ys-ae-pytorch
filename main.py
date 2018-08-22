@@ -6,26 +6,31 @@ from models.posenet import PoseNet
 import torch.backends.cudnn as cudnn
 import data.dataloader as dataload
 from torch.nn import DataParallel
+import tqdm
+from utils.misc import make_input, make_output
 
 #training parameters and options#
 
 def options():
     opts=argparse.ArgumentParser()
     
-    opts.add_argument('-c','--continue_exp',type=bool, default=False, help='continue the experiment')
+    opts.add_argument('-c','--continue_exp',type=str, default=False, help='continue the experiment')
     opts.add_argument('-e','--exp',     type=str,          default='pose',help='begin a new experiment')
     ##
     opts.add_argument('-nstack',         '--nstack',    type=int,  default=4,   help='the number of hourglass modules')
     opts.add_argument('-inp_dim',       '--inp_dim',    type=int,  default=256, help='the channels of the input for hourglass')
     opts.add_argument('-oup_dim',       '--oup_dim',    type=int,  default=68,  help='the channels of the output for prediction')
     opts.add_argument('-lr',                 '--lr',    type=float,default=2e-4,help='learning rate')
-    opts.add_argument('-batchsize',   '--batchsize',    type=int,  default=32  ,help='batchsize')
+    opts.add_argument('-batchsize',   '--batchsize',    type=int,  default=16  ,help='batchsize')
     opts.add_argument('-input_res',   '--input_res',    type=int,  default=512 ,help='the resolution size of input')
     opts.add_argument('-output_res', '--output_res',    type=int,  default=128 ,help='the resolution size of output')
     opts.add_argument('-num_workers','--num_workers',   type=int,  default=2  , help='number of workers')
     opts.add_argument('-train_iters','--train_iters',   type=int,  default=1000,help='')
     opts.add_argument('-valid_iters','--valid_iters',   type=int,  default=10  ,help='')
-
+    opts.add_argument('-max_num_people','--max_num_people',   type=int,  default=20,help='')
+    opts.add_argument('-push_loss','--push_loss',   type=float,  default=1e-3,help='')
+    opts.add_argument('-pull_loss','--pull_loss',   type=float,  default=1e-3,help='')
+    opts.add_argument('-detection_loss','--detection_loss',   type=float,  default=1,help='')
     return opts.parse_args()
 
 def adjust_lr(optimizer, epoch, gamma=0.9):
@@ -40,7 +45,7 @@ class Model_Checkpoints:
     def __init__(self,options):
         self.opts=options
 
-    def save_checkpoints(self,state,checkpoint_dir=None,filename='checkpoint.pth.tar'):
+    def save_checkpoints(self,state,checkpoint_dir=None,filename='_checkpoint.pth.tar'):
         '''
         param 'state' saves the state of the model parameters, example as :
         state={ 'epoch':      epoch + 1,
@@ -48,14 +53,13 @@ class Model_Checkpoints:
           'optimizer' : optimizer.state_dict(),}
         '''
         opts=self.opts
-        continue_exp=opt.continue_exp
+        continue_exp=opts.continue_exp
         if not continue_exp:
             if not os.path.exists('checkpoint/'+opts.exp):
                 os.makedirs('checkpoint/'+opts.exp)
             checkpoint_dir='checkpoint/'+opts.exp
         else:
-            checkpoint_dir='checkpoint/'+ continue_exp
-        filename = 'epoch'+str(state['epoch']) + filename
+            checkpoint_dir='checkpoint/'+ opts.continue_exp
         filepath = os.path.join(checkpoint_dir, filename)
         torch.save(state, filepath)
     
@@ -66,8 +70,9 @@ class Model_Checkpoints:
         opts=self.opts
         if opts.continue_exp:
             resume = os.path.join('checkpoint', opts.continue_exp)
-            f_list = os.listdir(resume)
-            resume_file={'resume_file':i  for i in f_list if os.path.splitext(i)[-1] == '.tar'}['resume_file']
+            resume_file=resume+'/_checkpoint.pth.tar'
+            #f_list = os.listdir(resume)
+            #resume_file={'resume_file':i  for i in f_list if os.path.splitext(i)[-1] == '.tar'}['resume_file']
             if os.path.isfile(resume_file):
                 print("=> loading checkpoint '{}'".format(resume))
                 checkpoint = torch.load(resume_file)
@@ -81,7 +86,7 @@ class Model_Checkpoints:
                 exit(0)
         return begin_epoch
 
-def train_func(opts,model,phase,**inputs):
+def train_func(opts,model,optimizer ,phase,**inputs):
     
     for i in inputs:
         inputs[i] = make_input(inputs[i])
@@ -107,15 +112,15 @@ def train_func(opts,model,phase,**inputs):
             my_loss = make_output( losses[i] )
             my_loss = my_loss.mean(axis = 0)
 
-            if my_loss.size == 1:
-                toprint += ' {}: {}'.format(i, format(my_loss.mean(), '.8f'))
-            else:
-                toprint += '\n{}'.format(i)
-                for j in my_loss:
-                    toprint += ' {}'.format(format(j.mean(), '.8f'))
+            #if my_loss.size == 1:
+             #   toprint += ' {}: {}'.format(i, format(my_loss.mean(), '.8f'))
+            #else:
+             #   toprint += '\n{}'.format(i)
+              #  for j in my_loss:
+               #     toprint += ' {}'.format(format(j.mean(), '.8f'))
 
         if phase == 'train':
-            optimizer = train_cfg['optimizer']
+            
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -132,7 +137,7 @@ def train_func(opts,model,phase,**inputs):
 def main():
     cudnn.benchmark = True
     cudnn.enabled = True
- 
+
     opts=options()
     continue_exp=opts.continue_exp
 
@@ -153,7 +158,10 @@ def main():
 
         #training and validation
         for phase in ['train', 'valid']:
-            num_step = opts['{}_iters'.format(phase)]
+            if phase =='train':
+            	num_step = opts.train_iters
+            else:
+            	num_step = opts.valid_iters
             generator = data_load_func(phase)
             print('start', phase)
 
@@ -162,10 +170,10 @@ def main():
             
             for i in show_range:
                 datas = next(generator)
-                outs = train_func(opts, phase, **datas)
-
-        Model_Checkpoints.save_checkpoints({
-            'epoch': epoch + 1,
+                outs = train_func(opts,model,optimizer , phase, **datas)
+        
+        Model_Checkpoints(opts).save_checkpoints({
+           	'epoch': epoch + 1,
             'state_dict': model.state_dict(),
             'optimizer' : optimizer.state_dict(),})
 
