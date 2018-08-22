@@ -132,7 +132,7 @@ def train_func(opts,model,phase,**inputs):
 def main():
     cudnn.benchmark = True
     cudnn.enabled = True
-
+ 
     opts=options()
     continue_exp=opts.continue_exp
 
