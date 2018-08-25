@@ -4,10 +4,11 @@ import tqdm
 import os
 import numpy as np
 import pickle
-
-from data.coco_pose.ref import ref_dir, flipRef
+from torch.nn import DataParallel
+from data.ref import ref_dir, flipRef
 from utils.misc import get_transform, kpt_affine, resize
 from utils.group import HeatmapParser
+from utils.misc import make_input, make_output
 
 valid_filepath = ref_dir + '/validation.pkl'
 
@@ -216,13 +217,40 @@ def get_img(inp_res = 512):
         img = cv2.imread(paths[i])[:,:,::-1]
         yield anns[i], img
 
-def main():
-    from train import init
-    func, config = init()
-    mode = config['opt'].mode
+def test_func(model,**inputs):
+    for i in inputs:
+        inputs[i] = make_input(inputs[i])
+    net = model.eval()
 
+    forward_net=DataParallel(net.cuda())
+    out = {}
+    net = forward_net.eval()
+    result = net(**inputs)
+    if type(result)!=list and type(result)!=tuple:
+        result = [result]
+    out['preds'] = [make_output(i) for i in result]
+    return out
+
+def main():
+    from main import options,Model_Checkpoints
+    from models.posenet import PoseNet
+    
+    opts=options()
+    mode=opts.mode
+    model=PoseNet(nstack=opts.nstack,inp_dim=opts.inp_dim,oup_dim=opts.oup_dim)
+    print (model)
+    print(">>> total params: {:.2f}M".format(sum(p.numel() for p in model.parameters()) / 1000000.0))
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=opts.lr)
+    epoch=Model_Checkpoints(opts).load_checkpoints(model,optimizer)
+    print("Use the model which is trained by {} epoches".format(epoch))
+
+    if opts.continue_exp is None:
+        print("Warning: you must choose a trained model")
+        
+    
     def runner(imgs):
-        return func(0, config, 'inference', imgs=torch.Tensor(np.float32(imgs)))['preds']
+        return test_func(model, imgs=torch.Tensor(np.float32(imgs)))['preds']
 
     def do(img):
         ans, scores = multiperson(img, runner, mode)
@@ -244,7 +272,7 @@ def main():
         gts.append(anns)
         preds.append(do(img))
 
-    prefix = os.path.join('exp', config['opt'].exp)
+    prefix = os.path.join('checkpoint', opts.continue_exp)
     coco_eval(prefix, preds, gts)
 
 if __name__ == '__main__':
