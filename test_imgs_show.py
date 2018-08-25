@@ -41,7 +41,7 @@ def options():
     opts.add_argument('-push_loss','--push_loss',   type=float,  default=1e-3,help='')
     opts.add_argument('-pull_loss','--pull_loss',   type=float,  default=1e-3,help='')
     opts.add_argument('-detection_loss','--detection_loss',   type=float,  default=1,help='')
-    opts.add_argument('-m', '--mode', type=str, default='single', help='scale mode')
+    opts.add_argument('-m', '--mode', type=str, default='multi', help='scale mode')
     opts.add_argument('-img_dir', '--img_dir', type=str, default='test_imgs/', help='test_imgs')
     opts.add_argument('-o', '--output_image_path', type=str, default='/result/test_imgs', help='output image name')
     return opts.parse_args()

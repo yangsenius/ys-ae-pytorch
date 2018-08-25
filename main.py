@@ -31,7 +31,7 @@ def options():
     opts.add_argument('-push_loss','--push_loss',   type=float,  default=1e-3,help='')
     opts.add_argument('-pull_loss','--pull_loss',   type=float,  default=1e-3,help='')
     opts.add_argument('-detection_loss','--detection_loss',   type=float,  default=1,help='')
-    opts.add_argument('-m', '--mode', type=str, default='single', help='scale mode')
+    opts.add_argument('-m', '--mode', type=str, default='multi', help='scale mode')
     return opts.parse_args()
 
 def adjust_lr(optimizer, epoch, gamma=0.9):
