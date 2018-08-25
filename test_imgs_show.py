@@ -8,7 +8,7 @@ import pickle
 import json
 import argparse
 
-from data.coco_pose.ref import ref_dir, flipRef
+from data.ref import ref_dir, flipRef
 from utils.misc import get_transform, kpt_affine, resize
 from utils.group import HeatmapParser
 
@@ -26,6 +26,9 @@ def options():
     
     opts.add_argument('-c','--continue_exp',type=str, default=False, help='continue the experiment')
     opts.add_argument('-e','--exp',     type=str,          default='pose',help='begin a new experiment')
+    opts.add_argument('-m', '--mode', type=str, default='single', help='scale mode')
+    opts.add_argument('-img_dir', '--img_dir', type=str, default='test_imgs/', help='test_imgs')
+    opts.add_argument('-o', '--output_image_path', type=str, default='/result/test_imgs', help='output image name')
     ##
     opts.add_argument('-nstack',         '--nstack',    type=int,  default=4,   help='the number of hourglass modules')
     opts.add_argument('-inp_dim',       '--inp_dim',    type=int,  default=256, help='the channels of the input for hourglass')
@@ -41,9 +44,7 @@ def options():
     opts.add_argument('-push_loss','--push_loss',   type=float,  default=1e-3,help='')
     opts.add_argument('-pull_loss','--pull_loss',   type=float,  default=1e-3,help='')
     opts.add_argument('-detection_loss','--detection_loss',   type=float,  default=1,help='')
-    opts.add_argument('-m', '--mode', type=str, default='multi', help='scale mode')
-    opts.add_argument('-img_dir', '--img_dir', type=str, default='test_imgs/', help='test_imgs')
-    opts.add_argument('-o', '--output_image_path', type=str, default='/result/test_imgs', help='output image name')
+  
     return opts.parse_args()
 
 
@@ -240,7 +241,9 @@ def main():
     mode = opts.mode
  
     model = PoseNet(nstack=opts.nstack,inp_dim=opts.inp_dim,oup_dim=opts.oup_dim)
-
+    optimizer = torch.optim.Adam(model.parameters(), lr=opts.lr)
+    epoch=Model_Checkpoints(opts).load_checkpoints(model,optimizer)
+    print("Use the model which is trained by {} epoches".format(epoch))
     def runner(imgs):
         return test_func(model, imgs=torch.Tensor(np.float32(imgs)))['preds']
 
@@ -270,9 +273,10 @@ def main():
             img=cv2.imread(img_dir+img_name)[:,:,::-1]
             cv2.imwrite('pose_results/'+img_name, img[:,:,::-1])
             preds=do(img)
+           
             
-           # with open(prefix + '/img_dt.json', 'wb') as f:
-            #    json.dump(sum(preds, []), f)
+            #with open(prefix + '/img_dt.json', 'wb') as f:
+                #json.dump(sum([preds], []), f)
             
             for i in preds:
                 
@@ -284,6 +288,7 @@ def main():
                 draw_limbs(img, keypoints)
 
                 cv2.imwrite('pose_results/'+img_name, img[:,:,::-1])
+                print("{} has been estimated".format(img_name))
     
     
 
