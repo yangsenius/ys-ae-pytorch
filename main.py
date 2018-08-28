@@ -32,6 +32,12 @@ def options():
     opts.add_argument('-pull_loss','--pull_loss',   type=float,  default=1e-3,help='')
     opts.add_argument('-detection_loss','--detection_loss',   type=float,  default=1,help='')
     opts.add_argument('-m', '--mode', type=str, default='single', help='scale mode')
+
+    print("\n==================Options=================")
+    from pprint import pprint
+    pprint(vars(opts.parse_args()), indent=4)
+    print("==========================================\n")
+
     return opts.parse_args()
 
 def adjust_lr(optimizer, epoch, gamma=0.9):
@@ -143,6 +149,7 @@ def main():
     continue_exp=opts.continue_exp
 
     model=PoseNet(nstack=opts.nstack,inp_dim=opts.inp_dim,oup_dim=opts.oup_dim)
+    
     print (model)
     print(">>> total params: {:.2f}M".format(sum(p.numel() for p in model.parameters()) / 1000000.0))
     optimizer = torch.optim.Adam(model.parameters(), lr=opts.lr)

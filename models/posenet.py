@@ -15,22 +15,22 @@ class Merge(nn.Module):
 class PoseNet(nn.Module):
     def __init__(self, nstack, inp_dim, oup_dim, bn=False, increase=128, **kwargs):
         super(PoseNet, self).__init__()
-        self.pre = nn.Sequential(
+        self.pre = nn.Sequential(             #图像降分辨率 预处理
             Conv(3, 64, 7, 2, bn=bn),
             Conv(64, 128, bn=bn),
             Pool(2, 2),
             Conv(128, 128, bn=bn),
             Conv(128, inp_dim, bn=bn)
         )
-        self.features = nn.ModuleList( [
+        self.features = nn.ModuleList( [             #沙漏模块堆叠
         nn.Sequential(
-            Hourglass(4, inp_dim, bn, increase),
+            Hourglass(4, inp_dim, bn, increase),    #4次下采样
             Conv(inp_dim, inp_dim, 3, bn=False),
             Conv(inp_dim, inp_dim, 3, bn=False)
-        ) for i in range(nstack)] )
+        ) for i in range(nstack)] )       #堆叠次数
 
         self.outs = nn.ModuleList( [Conv(inp_dim, oup_dim, 1, relu=False, bn=False) for i in range(nstack)] )
-        self.merge_features = nn.ModuleList( [Merge(inp_dim, inp_dim) for i in range(nstack-1)] )
+        self.merge_features = nn.ModuleList( [Merge(inp_dim, inp_dim) for i in range(nstack-1)] ) #融合
         self.merge_preds = nn.ModuleList( [Merge(oup_dim, inp_dim) for i in range(nstack-1)] )
 
         self.nstack = nstack

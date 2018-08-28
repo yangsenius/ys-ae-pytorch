@@ -61,20 +61,20 @@ class Conv(nn.Module):
 class Hourglass(nn.Module):
     def __init__(self, n, f, bn=None, increase=128):
         super(Hourglass, self).__init__()
-        nf = f + increase
-        self.up1 = Conv(f, f, 3, bn=bn)
+        nf = f + increase    # increae 是降低特征图大小时，同时增加的通道数
+        self.up1 = Conv(f, f, 3, bn=bn)  #跳层连接，通过卷积  
         # Lower branch
-        self.pool1 = Pool(2, 2)
+        self.pool1 = Pool(2, 2)          #下采样 x0.5
         self.low1 = Conv(f, nf, 3, bn=bn)
         # Recursive hourglass
         if n > 1:
-            self.low2 = Hourglass(n-1, nf, bn=bn)
+            self.low2 = Hourglass(n-1, nf, bn=bn)   # 迭代模块
         else:
-            self.low2 = Conv(nf, nf, 3, bn=bn)
+            self.low2 = Conv(nf, nf, 3, bn=bn)    
         self.low3 = Conv(nf, f, 3)
-        self.up2  = nn.UpsamplingNearest2d(scale_factor=2)
+        self.up2  = nn.Upsample(scale_factor=2)  #2x上采样
 
-    def forward(self, x):
+    def forward(self, x):    #前向计算
         up1  = self.up1(x)
         pool1 = self.pool1(x)
         low1 = self.low1(pool1)
