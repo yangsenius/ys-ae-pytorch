@@ -1,8 +1,26 @@
 import torch
 import numpy as np
 import importlib
-
+import json
+import os
 # Helpers when setting up training
+
+def save_options(opt, file_path ,model, optimizer):
+    
+    model_struc = model.__str__()
+    model_struc = {'Model': model_struc, 'Optimizer': optimizer}
+
+    with open(file_path, 'w') as f:
+        f.write(json.dumps(vars(opt), sort_keys=True, indent=4))
+        f.write(json.dumps(model_struc, sort_keys=True, indent=4))
+        
+def adjust_lr(optimizer, epoch, gamma=0.9):
+    schedule = list(range(3,32,2))
+    """Sets the learning rate to the initial LR decayed by schedule"""
+    if epoch in schedule:
+        for param_group in optimizer.param_groups:
+            param_group['lr'] *= gamma
+    return optimizer.state_dict()['param_groups'][0]['lr']
 
 def importNet(net):
     t = net.split('.')

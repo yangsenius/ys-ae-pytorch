@@ -7,7 +7,10 @@ import torch.backends.cudnn as cudnn
 import data.dataloader as dataload
 from torch.nn import DataParallel
 import tqdm
-from utils.misc import make_input, make_output
+from utils.misc import make_input, make_output, save_options
+from tensorboardX import SummaryWriter
+
+writer = SummaryWriter('log')
 
 #training parameters and options#
 
@@ -21,7 +24,7 @@ def options():
     opts.add_argument('-inp_dim',       '--inp_dim',    type=int,  default=256, help='the channels of the input for hourglass')
     opts.add_argument('-oup_dim',       '--oup_dim',    type=int,  default=68,  help='the channels of the output for prediction')
     opts.add_argument('-lr',                 '--lr',    type=float,default=2e-4,help='learning rate')
-    opts.add_argument('-batchsize',   '--batchsize',    type=int,  default=16  ,help='batchsize')
+    opts.add_argument('-batchsize',   '--batchsize',    type=int,  default=8  ,help='batchsize')
     opts.add_argument('-input_res',   '--input_res',    type=int,  default=512 ,help='the resolution size of input')
     opts.add_argument('-output_res', '--output_res',    type=int,  default=128 ,help='the resolution size of output')
     opts.add_argument('-num_workers','--num_workers',   type=int,  default=2  , help='number of workers')
@@ -32,12 +35,19 @@ def options():
     opts.add_argument('-pull_loss','--pull_loss',   type=float,  default=1e-3,help='')
     opts.add_argument('-detection_loss','--detection_loss',   type=float,  default=1,help='')
     opts.add_argument('-m', '--mode', type=str, default='single', help='scale mode')
-
+    opts.add_argument('-epochs', '--total_epochs', type=int, default=702, help='training epochs')
+    opts.add_argument('-checkpoint_name','--checkpoint_name',   type=str,  default='/_checkpoint.pth.tar',help='')
+    
+    ######## options for invisible kepoints in labels  :: mask should be set 0 #########
+    opts.add_argument('-mask', '--masks_flag', type=int, default=1, help='if use mask or not')
+    opts.add_argument('-sigma_scale', '--sigma_scale_for_invisible', type=int, default=2, help='')
+    opts.add_argument('-small_weight','--small_weight_for_invisible',type=float,default=0.75,help='')
+    
     print("\n==================Options=================")
     from pprint import pprint
     pprint(vars(opts.parse_args()), indent=4)
     print("==========================================\n")
-
+    
     return opts.parse_args()
 
 def adjust_lr(optimizer, epoch, gamma=0.9):
@@ -77,19 +87,19 @@ class Model_Checkpoints:
         opts=self.opts
         if opts.continue_exp:
             resume = os.path.join('checkpoint', opts.continue_exp)
-            resume_file=resume+'/_checkpoint.pth.tar'
+            resume_file=resume+opts.checkpoint_name
             #f_list = os.listdir(resume)
             #resume_file={'resume_file':i  for i in f_list if os.path.splitext(i)[-1] == '.tar'}['resume_file']
             if os.path.isfile(resume_file):
-                print("=> loading checkpoint '{}'".format(resume))
+                print("=> loading checkpoint '{}'".format(resume_file))
                 checkpoint = torch.load(resume_file)
                 train_net.load_state_dict(checkpoint['state_dict'])
                 train_optimizer.load_state_dict(checkpoint['optimizer'])
                 begin_epoch = checkpoint['epoch']
                 print("=> loaded checkpoint '{}' (epoch {})"
-                    .format(resume, checkpoint['epoch']))
+                    .format(resume_file, checkpoint['epoch']))
             else:
-                print("=> no checkpoint found at '{}'".format(resume))
+                print("=> no checkpoint found at '{}'".format(resume_file))
                 exit(0)
         return begin_epoch
 
@@ -131,15 +141,15 @@ def train_func(opts,model,optimizer ,phase,**inputs):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        return None
-    else:
-        out = {}
-        net = net.eval()
-        result = net(**inputs)
-        if type(result)!=list and type(result)!=tuple:
-            result = [result]
-        out['preds'] = [make_output(i) for i in result]
-        return out
+        return loss
+    #else:
+    #    out = {}
+    #    net = net.eval()
+    #    result = net(**inputs)
+    #    if type(result)!=list and type(result)!=tuple:
+    #        result = [result]
+    #    out['preds'] = [make_output(i) for i in result]
+    #    return out,None
 
 def main():
     cudnn.benchmark = True
@@ -148,23 +158,23 @@ def main():
     opts=options()
     continue_exp=opts.continue_exp
 
-    model=PoseNet(nstack=opts.nstack,inp_dim=opts.inp_dim,oup_dim=opts.oup_dim)
-    
-    print (model)
+    model=PoseNet(nstack=opts.nstack, inp_dim=opts.inp_dim, oup_dim=opts.oup_dim, masks_flag=opts.masks_flag)
+    #print (model)
     print(">>> total params: {:.2f}M".format(sum(p.numel() for p in model.parameters()) / 1000000.0))
     optimizer = torch.optim.Adam(model.parameters(), lr=opts.lr)
     ##train datas and valid datas loader generator##
     data_load_func=dataload.init(opts)
-
+    save_options(opts, os.path.join('log/train_option/' + opts.exp), model.__str__(), optimizer.__str__())
     begin_epoch=0
+    total_epochs=opts.total_epochs
     #choose whether continue the specified experiment checkpoint that was saved last time or not#
     if continue_exp:
         begin_epoch=Model_Checkpoints(opts).load_checkpoints(model,optimizer)
         print('Start training # epoch{}'.format(begin_epoch))
 
-    for epoch in range(begin_epoch,500):
+    for epoch in range(begin_epoch,total_epochs):
         print ('-------------Training Epoch {}-------------'.format(epoch))
-        lr = adjust_lr(optimizer, epoch)
+        #lr = adjust_lr(optimizer, epoch)
 
         #training and validation
         for phase in ['train', 'valid']:
@@ -180,13 +190,19 @@ def main():
             
             for i in show_range:
                 datas = next(generator)
-                outs = train_func(opts,model,optimizer , phase, **datas)
+                loss = train_func(opts,model,optimizer , phase, **datas)
+
+                if i % 20 == 0 and phase == 'train':
+                    niter = epoch * num_step + i
+                    writer.add_scalar('{}/Loss'.format(phase), loss.data[0], niter)
+                if phase == 'valid':
+                    writer.add_scalar('{}/Loss'.format(phase), loss.data[0], niter)
         
         Model_Checkpoints(opts).save_checkpoints({
            	'epoch': epoch + 1,
             'state_dict': model.state_dict(),
             'optimizer' : optimizer.state_dict(),})
-        if epoch % 50 ==0:
+        if epoch % 50 ==0 and epoch != 0:
         	Model_Checkpoints(opts).save_checkpoints({
            		'epoch': epoch + 1,
            	 	'state_dict': model.state_dict(),

@@ -8,36 +8,50 @@ import torch.utils.data
 from multiprocessing import dummy
 
 class GenerateHeatmap():
-    def __init__(self, output_res, num_parts=17):
+    def __init__(self, output_res, num_parts=17, sigma_scale_for_invisible=2):
         self.output_res = output_res
         self.num_parts = num_parts
         sigma = self.output_res/64
         self.sigma = sigma
+        self.sigma_scale_for_invisible=sigma_scale_for_invisible
+        
+    def gauss(self, hms, sigma, pt, idx):
         size = 6*sigma + 3
         x = np.arange(0, size, 1, float)
         y = x[:, np.newaxis]
         x0, y0 = 3*sigma + 1, 3*sigma + 1
-        self.g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
+        g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
+        x, y = int(pt[0]), int(pt[1])
+        if x>=0 and y>=0 and x<self.output_res and y<self.output_res:
+ 
+            ul = int(x - 3*sigma - 1), int(y - 3*sigma - 1)
+            br = int(x + 3*sigma + 2), int(y + 3*sigma + 2)
+
+            c,d = max(0, -ul[0]), min(br[0], self.output_res) - ul[0]
+            a,b = max(0, -ul[1]), min(br[1], self.output_res) - ul[1]
+
+            cc,dd = max(0, ul[0]), min(br[0], self.output_res)
+            aa,bb = max(0, ul[1]), min(br[1], self.output_res)
+        
+            hms[idx, aa:bb,cc:dd] = np.maximum(hms[idx, aa:bb,cc:dd], g[a:b,c:d])
+        
+        
 
     def __call__(self, keypoints):
         hms = np.zeros(shape = (self.num_parts, self.output_res, self.output_res), dtype = np.float32)
-        sigma = self.sigma
+        sigma_scale_for_invisible=self.sigma_scale_for_invisible
+        
         for p in keypoints:
             for idx, pt in enumerate(p):
-                if pt[2]>0:#如果这个点不可见的话，是不是加入一个先验模型的大概率点？？
-                    x, y = int(pt[0]), int(pt[1])
-                    if x<0 or y<0 or x>=self.output_res or y>=self.output_res:
-                        #print('not in', x, y)
-                        continue
-                    ul = int(x - 3*sigma - 1), int(y - 3*sigma - 1)
-                    br = int(x + 3*sigma + 2), int(y + 3*sigma + 2)
-
-                    c,d = max(0, -ul[0]), min(br[0], self.output_res) - ul[0]
-                    a,b = max(0, -ul[1]), min(br[1], self.output_res) - ul[1]
-
-                    cc,dd = max(0, ul[0]), min(br[0], self.output_res)
-                    aa,bb = max(0, ul[1]), min(br[1], self.output_res)
-                    hms[idx, aa:bb,cc:dd] = np.maximum(hms[idx, aa:bb,cc:dd], self.g[a:b,c:d])
+                if pt[2]==2:#如果这个点不可见的话，是不是加入一个先验模型的大概率点？？
+                
+                    sigma = self.sigma
+                    self.gauss(hms,sigma,pt,idx)
+                    
+                if pt[2]==1:#如果这个点不可见的话，是不是加入一个先验模型的大概率点？？
+                
+                    sigma = self.sigma * sigma_scale_for_invisible  #对于不可见，但标注点，让heatmap高斯分布的方差变大，使得该点计算loss所占权重变小，或者该点容忍区域变大
+                    self.gauss(hms,sigma,pt,idx)
         return hms
 
 class KeypointsRef():
@@ -81,7 +95,7 @@ class Dataset(torch.utils.data.Dataset):
         ann = ds.get_anns(idx)
         keypoints = ds.get_keypoints(idx, ann)
 
-        keypoints2 = [i for i in keypoints if np.sum(i[:, 2]>0)>1]
+        keypoints = [i for i in keypoints if np.sum(i[:, 2]>0)>1]
 
         height, width = inp.shape[0:2]
         center = np.array((width/2, height/2))
@@ -156,7 +170,10 @@ def init(opts):
 
     def gen(phase):
         batchsize = opts.batchsize
-        batchnum = opts['{}_iters'.format(phase)]
+        if phase=='train':
+        	batchnum = opts.train_iters
+        else:
+        	batchnum = opts.valid_iters
         loader = loaders[phase].__iter__()
         for i in range(batchnum):
             imgs, masks, keypoints, heatmaps = next(loader)
