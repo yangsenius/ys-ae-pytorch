@@ -116,12 +116,17 @@ def train_func(opts,model,optimizer ,phase,**inputs):
     forward_net=DataParallel(net.cuda())
 
     if phase !='inference':
-        
-        output = forward_net(inputs['imgs'])    
-        
-        losses = model.calc_loss(output,**{i:inputs[i] for i in inputs if i!='imgs'})
-        losses ={'push_loss':losses[0]*opts.push_loss,'pull_loss':losses[1]*opts.pull_loss,'detection_loss':losses[2]*opts.detection_loss}
-        loss = 0
+        if phase == 'valid':
+            with torch.no_grad():
+                output = forward_net(inputs['imgs'])
+                losses = model.calc_loss(output,**{i:inputs[i] for i in inputs if i!='imgs'})
+                losses ={'push_loss':losses[0]*opts.push_loss,'pull_loss':losses[1]*opts.pull_loss,'detection_loss':losses[2]*opts.detection_loss}
+                loss = 0
+        else:
+            output = forward_net(inputs['imgs']) 
+            losses = model.calc_loss(output,**{i:inputs[i] for i in inputs if i!='imgs'})
+            losses ={'push_loss':losses[0]*opts.push_loss,'pull_loss':losses[1]*opts.pull_loss,'detection_loss':losses[2]*opts.detection_loss}
+            loss = 0
             
         for i in losses:
             loss = loss + torch.mean(losses[i])
